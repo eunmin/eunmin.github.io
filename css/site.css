@@ -1,8 +1,12 @@
-body, code {
+body {
     font-family: 'Fira Code', monospace;
     font-size: 13px;
+    margin-left: 5%;
+    margin-right: 5%;
 }
 
 code {
+    font-family: 'Fira Code', monospace;
+    font-size: 13px;
     border: 1px solid #ccc;
 }
