@@ -12,7 +12,8 @@
   </head>
   <body>
     <h1>fs2 가이드</h1>
-    <div>
+    <section>
+      <h2>스트림 만들기</h2>
       <pre><code class="scala">
 import fs2.Stream
 
@@ -25,14 +26,14 @@ val s1a = Stream(1,2,3) // variadic
 val s1b = Stream.emits(List(1,2,3)) // accepts any Seq
 // s1b: Stream[Nothing, Int] = Stream(..)
       </code></pre>
-      
+      <p>순수한 스트림은 리스트나 벡터로 바꿀 수 있다.</p>
       <pre><code class="scala">
 s1.toList
 // res0: List[Int] = List(1)
 s1.toVector
 // res1: Vector[Int] = Vector(1)	  
       </code></pre>
-
+      <p>스트림은 리스트 함수 같은 함수가 많이 있다. 아래는 몇가지 예다.</p>
       <pre><code class="scala">
 (Stream(1,2,3) ++ Stream(4,5)).toList
 // res2: List[Int] = List(1, 2, 3, 4, 5)
@@ -53,18 +54,20 @@ Stream(1,2,3).repeat.take(9).toList
 Stream(1,2,3).repeatN(2).toList
 // res10: List[Int] = List(1, 2, 3, 1, 2, 3)	  
       </code></pre>
-      
+      <p>스트림 안에 효과를 넣을 수 있다.</p>
       <pre><code class="scala">
 import cats.effect.IO
 
 val eff = Stream.eval(IO { println("BEING RUN!!"); 1 + 1 })
 // eff: Stream[IO, Int] = Stream(..)	  
       </code></pre>
-      
+      <p>Stream.eval은 스트림이 인터프리트 될 때 어떤 효과가 일어날지를 담고 있다.</p>
+      <p>You may use IO for effects or bring your own, just by implementing a few interfaces for your effect type
+	(e.g., cats.MonadError[?, Throwable], cats.effect.Sync, cats.effect.Async, cats.effect.Concurrent, and cats.effect.Effect).</p>
       <pre><code class="scala">
 def eval[F[_],A](f: F[A]): Stream[F,A]	  
       </code></pre>
-      
+      <p></p>
       <pre><code class="scala">
 eff.toList
 // error: value toList is not a member of fs2.Stream[cats.effect.IO,Int]
@@ -100,7 +103,464 @@ rc.unsafeRunSync()
 // BEING RUN!!
 // res16: Int = 2	  
       </code></pre>
+    </section>
 
-    </div>
+    <section>
+      <h2>청크</h2>
+      <pre><code class="scala">
+import fs2.Chunk
+
+val s1c = Stream.chunk(Chunk.doubles(Array(1.0, 2.0, 3.0)))
+// s1c: Stream[Nothing, Double] = Stream(..)
+
+s1c.mapChunks { ds =>
+  val doubles = ds.toDoubles
+  /* do things unboxed using doubles.{values,size} */
+ doubles
+}
+// res17: Stream[Nothing, Double] = Stream(..)	  
+      </code></pre>
+    </section>
+
+    <section>
+      <h2>기본 스트림 연산</h2>
+      <pre><code class="scala">
+val appendEx1 = Stream(1,2,3) ++ Stream.emit(42)
+// appendEx1: Stream[Nothing, Int] = Stream(..)
+val appendEx2 = Stream(1,2,3) ++ Stream.eval(IO.pure(4))
+// appendEx2: Stream[IO[A], Int] = Stream(..)
+
+appendEx1.toVector
+// res18: Vector[Int] = Vector(1, 2, 3, 42)
+appendEx2.compile.toVector.unsafeRunSync()
+// res19: Vector[Int] = Vector(1, 2, 3, 4)
+
+appendEx1.map(_ + 1).toList
+// res20: List[Int] = List(2, 3, 4, 43)	  
+      </code></pre>
+      <pre><code class="scala">
+appendEx1.flatMap(i => Stream.emits(List(i,i))).toList
+// res21: List[Int] = List(1, 1, 2, 2, 3, 3, 42, 42)
+      </code></pre>
+    </section>
+
+    <section>
+      <h2>에러 처리</h2>
+      <pre><code class="scala">
+val err = Stream.raiseError[IO](new Exception("oh noes!"))
+// err: Stream[IO, Nothing] = Stream(..)
+val err2 = Stream(1,2,3) ++ (throw new Exception("!@#$"))
+// err2: Stream[Nothing, Int] = Stream(..)
+val err3 = Stream.eval(IO(throw new Exception("error in effect!!!")))
+// err3: Stream[IO, Nothing] = Stream(..)
+      </code></pre>
+      <pre><code class="scala">
+try err.compile.toList.unsafeRunSync catch { case e: Exception => println(e) }
+// java.lang.Exception: oh noes!
+// res22: Any = ()
+      </code></pre>
+      <pre><code class="scala">
+try err2.toList catch { case e: Exception => println(e) }
+// java.lang.Exception: !@#$
+// res23: Any = ()
+      </code></pre>
+      <pre><code class="scala">
+try err3.compile.drain.unsafeRunSync() catch { case e: Exception => println(e) }
+// java.lang.Exception: error in effect!!!
+      </code></pre>
+      <pre><code class="scala">
+err.handleErrorWith { e => Stream.emit(e.getMessage) }.compile.toList.unsafeRunSync()
+// res25: List[String] = List("oh noes!")
+      </code></pre>
+    </section>
+
+    <section>
+      <h2>리소스 획득</h2>
+      <pre><code class="scala">
+val count = new java.util.concurrent.atomic.AtomicLong(0)
+// count: java.util.concurrent.atomic.AtomicLong = 0
+val acquire = IO { println("incremented: " + count.incrementAndGet); () }
+// acquire: IO[Unit] = IO$178531618
+val release = IO { println("decremented: " + count.decrementAndGet); () }
+// release: IO[Unit] = IO$902972128
+      </code></pre>
+      <pre><code class="scala">
+Stream.bracket(acquire)(_ => release).flatMap(_ => Stream(1,2,3) ++ err).compile.drain.unsafeRunSync()
+// java.lang.Exception: oh noes!
+// 	at repl.Session$App.<init>(guide.md:153)
+// 	at repl.Session$.app(guide.md:3)
+      </code></pre>
+      <pre><code class="scala">
+count.get
+// res26: Long = 0L
+      </code></pre>
+      <pre><code class="scala">
+def bracket[F[_], R](acquire: F[R])(release: R => F[Unit]): Stream[F, R]
+      </code></pre>
+    </section>
+
+    <section>
+      <h2>예제 (스트림 만들기)</h2>
+      <pre><code class="scala">
+Stream(1,0).repeat.take(6).toList
+// res27: List[Int] = List(1, 0, 1, 0, 1, 0)
+Stream(1,2,3).drain.toList
+// res28: List[Nothing] = List()
+Stream.eval_(IO(println("!!"))).compile.toVector.unsafeRunSync()
+// !!
+// res29: Vector[Nothing] = Vector()
+(Stream(1,2) ++ Stream(3).map(_ => throw new Exception("nooo!!!"))).attempt.toList
+// res30: List[Either[Throwable, Int]] = List(
+//   Right(1),
+//   Right(2),
+//   Left(java.lang.Exception: nooo!!!)
+//) 
+      </code></pre>
+    </section>
+
+    <section>
+      <h2>상태있는 스트림 변환</h2>
+      <pre><code class="scala">
+import fs2._
+
+def tk[F[_],O](n: Long): Pipe[F,O,O] =
+  in => in.scanChunksOpt(n) { n =>
+    if (n <= 0) None
+    else Some(c => c.size match {
+      case m if m < n => (n - m, c)
+      case m => (0, c.take(n.toInt))
+    })
+  }
+
+Stream(1,2,3,4).through(tk(2)).toList
+// res32: List[Int] = List(1, 2)
+      </code></pre>
+      <pre><code class="scala">
+in => in.scanChunksOpt(n) { n =>
+      </code></pre>
+      <pre><code class="scala">
+if (n <= 0) None
+      </code></pre>
+      <pre><code class="scala">
+else Some(c => c.size match {
+  case m if m < n => (n - m, c)
+  case m => (0, c.take(n.toInt))
+})
+      </code></pre>
+      <pre><code class="scala">
+import fs2._
+
+def tk[F[_],O](n: Long): Pipe[F,O,O] = {
+  def go(s: Stream[F,O], n: Long): Pull[F,O,Unit] = {
+    s.pull.uncons.flatMap {
+      case Some((hd,tl)) =>
+        hd.size match {
+          case m if m <= n => Pull.output(hd) >> go(tl, n - m)
+          case m => Pull.output(hd.take(n.toInt)) >> Pull.done
+        }
+      case None => Pull.done
+    }
+  }
+  in => go(in,n).stream
+}
+
+Stream(1,2,3,4).through(tk(2)).toList
+// res34: List[Int] = List(1, 2)
+      </code></pre>
+      <pre><code class="scala">
+def go(s: Stream[F,O], n: Long): Pull[F,O,Unit] = {
+      </code></pre>
+      <pre><code class="scala">
+s.pull.uncons.flatMap {
+      </code></pre>
+      <pre><code class="scala">
+case Some((hd,tl)) =>
+  hd.size match {
+    case m if m <= n => Pull.output(hd) >> go(tl, n - m)
+    case m => Pull.output(hd.take(n)) >> Pull.done
+  }
+      </code></pre>
+      <pre><code class="scala">
+in => go(in,n).stream
+      </code></pre>
+      <pre><code class="scala">
+val s2 = Stream(1,2,3,4).through(tk(2))
+// s2: Stream[Nothing, Int] = Stream(..)
+s2.toList
+// res35: List[Int] = List(1, 2)
+      </code></pre>
+    </section>
+    
+    <section>
+      <h2>연습문제 (스트림 변환)</h2>
+      <pre><code class="scala">
+Stream.range(0,100).takeWhile(_ < 7).toList
+// res36: List[Int] = List(0, 1, 2, 3, 4, 5, 6)
+Stream("Alice","Bob","Carol").intersperse("|").toList
+// res37: List[String] = List("Alice", "|", "Bob", "|", "Carol")
+Stream.range(1,10).scan(0)(_ + _).toList // running sum
+// res38: List[Int] = List(0, 1, 3, 6, 10, 15, 21, 28, 36, 45)
+      </code></pre>
+    </section>
+    <section>
+      <h2>동시성</h2>
+      <pre><code class="scala">
+import cats.effect.IO
+
+Stream(1,2,3).merge(Stream.eval(IO { Thread.sleep(200); 4 })).compile.toVector.unsafeRunSync()
+// error: Cannot find implicit value for Concurrent[[+A]cats.effect.IO[A]].
+// Building this implicit value might depend on having an implicit
+// s.c.ExecutionContext in scope, a Scheduler, a ContextShift[[+A]cats.effect.IO[A]]
+// or some equivalent type.
+// Stream(1,2,3).merge(Stream.eval(IO { Thread.sleep(200); 4 })).compile.toVector.unsafeRunSync()
+// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      </code></pre>
+      <pre><code class="scala">
+import cats.effect.{ContextShift, IO}
+
+implicit val ioContextShift: ContextShift[IO] = IO.contextShift(scala.concurrent.ExecutionContext.Implicits.global)
+// ioContextShift: ContextShift[IO] = cats.effect.internals.IOContextShift@3b22448b
+
+Stream(1,2,3).merge(Stream.eval(IO { Thread.sleep(200); 4 })).compile.toVector.unsafeRunSync()
+// res40: Vector[Int] = Vector(1, 2, 3, 4)
+      </code></pre>
+      <pre><code class="scala">
+// note Concurrent[F] bound
+import cats.effect.Concurrent
+def parJoin[F[_]: Concurrent,O](maxOpen: Int)(outer: Stream[F, Stream[F, O]]): Stream[F, O]
+      </code></pre>
+    </section>
+    <section>
+      <h2>연습문제 (동시성)</h2>
+      <pre><code class="scala">
+type Pipe2[F[_],-I,-I2,+O] = (Stream[F,I], Stream[F,I2]) => Stream[F,O]
+
+/** Like `merge`, but halts as soon as _either_ branch halts. */
+def mergeHaltBoth[F[_]:Concurrent,O]: Pipe2[F,O,O,O] = (s1, s2) => ???
+      </code></pre>
+    </section>
+    <section>
+      <h2>인터럽트</h2>
+      <pre><code class="scala">
+import fs2.Stream
+import cats.effect.IO
+import cats.effect.concurrent.Deferred
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration._
+
+implicit val contextShift = IO.contextShift(ExecutionContext.global)
+// contextShift: cats.effect.ContextShift[IO] = cats.effect.internals.IOContextShift@553cd556
+implicit val timer = IO.timer(ExecutionContext.global)
+// timer: cats.effect.Timer[IO] = cats.effect.internals.IOTimer@159556d0
+      </code></pre>
+      <pre><code class="scala">
+val program =
+  Stream.eval(Deferred[IO, Unit]).flatMap { switch =>
+    val switcher =
+      Stream.eval(switch.complete(())).delayBy(5.seconds)
+
+    val program =
+      Stream.repeatEval(IO(println(java.time.LocalTime.now))).metered(1.second)
+
+    program
+      .interruptWhen(switch.get.attempt)
+      .concurrently(switcher)
+  }
+// program: Stream[IO[x], Unit] = Stream(..)
+
+program.compile.drain.unsafeRunSync
+// 12:53:33.233024
+// 12:53:34.235712
+// 12:53:35.240551
+// 12:53:36.244284
+      </code></pre>
+      <pre><code class="scala">
+val program =
+  Stream.eval(Deferred[IO, Unit]).flatMap { switch =>
+      </code></pre>
+      <pre><code class="scala">
+val switcher =
+  Stream.eval(switch.complete(())).delayBy(5.seconds)
+      </code></pre>
+      <pre><code class="scala">
+val program =
+  Stream.repeatEval(IO(println(java.time.LocalTime.now))).metered(1.second)
+      </code></pre>
+      <pre><code class="scala">
+program
+  .interruptWhen(switch.get.attempt)
+  .concurrently(switcher)
+      </code></pre>
+      <pre><code class="scala">
+val program1 =
+  Stream.
+    repeatEval(IO(println(java.time.LocalTime.now))).
+    metered(1.second).
+    interruptAfter(5.seconds)
+// program1: Stream[IO[x], Unit] = Stream(..)
+
+program1.compile.drain.unsafeRunSync
+// 12:53:38.237603
+// 12:53:39.242028
+// 12:53:40.246843
+// 12:53:41.251163
+      </code></pre>
+    </section>
+    <section>
+      <h2>외부 세계와 통신하기</h2>
+      <pre><code class="scala">
+def destroyUniverse(): Unit = { println("BOOOOM!!!"); } // stub implementation // stub implementation
+
+val s = Stream.eval_(IO { destroyUniverse() }) ++ Stream("...moving on")
+// s: Stream[IO[x], String] = Stream(..)
+s.compile.toVector.unsafeRunSync()
+// BOOOOM!!!
+// res44: Vector[String] = Vector("...moving on")
+      </code></pre>
+      <pre><code class="scala">
+import cats.effect.Sync
+
+val T = Sync[IO]
+// T: Sync[IO] = cats.effect.IOInstances$$anon$3@46edc055
+val s2 = Stream.eval_(T.delay { destroyUniverse() }) ++ Stream("...moving on")
+// s2: Stream[IO[x], String] = Stream(..)
+s2.compile.toVector.unsafeRunSync()
+// BOOOOM!!!
+// res45: Vector[String] = Vector("...moving on")
+      </code></pre>
+      <pre><code class="scala">
+trait Connection {
+  def readBytes(onSuccess: Array[Byte] => Unit, onFailure: Throwable => Unit): Unit
+
+  // or perhaps
+  def readBytesE(onComplete: Either[Throwable,Array[Byte]] => Unit): Unit =
+    readBytes(bs => onComplete(Right(bs)), e => onComplete(Left(e)))
+
+  override def toString = "<connection>"
+}
+      </code></pre>
+      <pre><code class="scala">
+trait Async[F[_]] extends MonadError[F, Throwable] {
+  ...
+  /**
+   Create an `F[A]` from an asynchronous computation, which takes the form
+   of a function with which we can register a callback. This can be used
+   to translate from a callback-based API to a straightforward monadic
+   version.
+   */
+  def async[A](register: (Either[Throwable,A] => Unit) => Unit): F[A]
+}
+      </code></pre>
+      <pre><code class="scala">
+val c = new Connection {
+  def readBytes(onSuccess: Array[Byte] => Unit, onFailure: Throwable => Unit): Unit = {
+    Thread.sleep(200)
+    onSuccess(Array(0,1,2))
+  }
+}
+// c: AnyRef with Connection = <connection>
+
+val bytes = cats.effect.Async[IO].async[Array[Byte]] { (cb: Either[Throwable,Array[Byte]] => Unit) =>
+  c.readBytesE(cb)
+}
+// bytes: IO[Array[Byte]] = IO$1361128128
+
+Stream.eval(bytes).map(_.toList).compile.toVector.unsafeRunSync()
+// res46: Vector[List[Byte]] = Vector(List(0, 1, 2))
+      </code></pre>
+      <pre><code class="scala">
+import fs2._
+import fs2.concurrent._
+import cats.effect.{ConcurrentEffect, ContextShift, IO}
+
+type Row = List[String]
+type RowOrError = Either[Throwable, Row]
+
+trait CSVHandle {
+  def withRows(cb: RowOrError => Unit): Unit
+}
+
+def rows[F[_]](h: CSVHandle)(implicit F: ConcurrentEffect[F], cs: ContextShift[F]): Stream[F,Row] = {
+  for {
+    q <- Stream.eval(Queue.unbounded[F, Option[RowOrError]])
+    _ <- Stream.eval { F.delay {
+      def enqueue(v: Option[RowOrError]): Unit = F.runAsync(q.enqueue1(v))(_ => IO.unit).unsafeRunSync
+
+      // Fill the data
+      h.withRows(e => enqueue(Some(e))) 
+      // Upon returning from withRows signal that our stream has ended.
+      enqueue(None)
+    } }
+    // unNoneTerminate halts the stream at the first `None`.
+    // Without it the queue would be infinite.
+    row <- q.dequeue.unNoneTerminate.rethrow
+  } yield row
+}
+      </code></pre>
+    </section>
+    <section>
+      <h2>리엑티브 스트림</h2>
+      <pre><code class="scala">
+import fs2._
+import fs2.interop.reactivestreams._
+import cats.effect.{ContextShift, IO}
+import scala.concurrent.ExecutionContext
+      </code></pre>
+      <pre><code class="scala">
+implicit val contextShift: ContextShift[IO] = IO.contextShift(ExecutionContext.global)
+// contextShift: ContextShift[IO] = cats.effect.internals.IOContextShift@5e0ee517
+      </code></pre>
+      <pre><code class="scala">
+val stream = Stream(1, 2, 3).covary[IO]
+// stream: Stream[IO, Int] = Stream(..)
+stream.toUnicastPublisher
+// res49: StreamUnicastPublisher[IO[A], Int] = fs2.interop.reactivestreams.StreamUnicastPublisher@30d09fa5
+      </code></pre>
+      <pre><code class="scala">
+val publisher: StreamUnicastPublisher[IO, Int] = Stream(1, 2, 3).covary[IO].toUnicastPublisher
+// publisher: StreamUnicastPublisher[IO, Int] = fs2.interop.reactivestreams.StreamUnicastPublisher@410c26bb
+publisher.toStream[IO]
+// res50: Stream[IO, Int] = Stream(..)
+      </code></pre>
+    </section>
+    <section>
+      <h2>더 볼거리</h2>
+    </section>
+    <section>
+      <h2>부록: 어떻게 스트림 동작을 멈출 수 있을까?</h2>
+      <pre><code class="scala">
+import fs2._
+import cats.effect.IO
+case object Err extends Throwable
+
+(Stream(1) ++ Stream(2).map(_ => throw Err)).take(1).toList
+// res52: List[Int] = List(1)
+(Stream(1) ++ Stream.raiseError[IO](Err)).take(1).compile.toList.unsafeRunSync()
+// res53: List[Int] = List(1)
+      </code></pre>
+      <pre><code class="scala">
+(Stream(1) ++ Stream.raiseError[IO](Err)).take(1).compile.toList.unsafeRunSync()
+// res54: List[Int] = List(1)
+      </code></pre>
+      <pre><code class="scala">
+Stream(1).covary[IO].
+          onFinalize(IO { println("finalized!") }).
+          take(1).
+          compile.toVector.unsafeRunSync()
+// finalized!
+// res55: Vector[Int] = Vector(1)
+      </code></pre>
+      <pre><code class="scala">
+import cats.effect.ContextShift
+
+implicit lazy val ioContextShift: ContextShift[IO] = IO.contextShift(scala.concurrent.ExecutionContext.Implicits.global)
+val s1 = (Stream(1) ++ Stream(2)).covary[IO]
+// s1: Stream[IO, Int] = Stream(..)
+val s2 = (Stream.empty ++ Stream.raiseError[IO](Err)).handleErrorWith { e => println(e); Stream.raiseError[IO](e) }
+// s2: Stream[IO[x], Nothing] = Stream(..)
+val merged = s1 merge s2 take 1
+// merged: Stream[IO[x], Int] = Stream(..)
+      </code></pre>
+    </section>
   </body>
 </html>
