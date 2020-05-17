@@ -67,29 +67,30 @@ val eff = Stream.eval(IO { println("BEING RUN!!"); 1 + 1 })
       <pre><code class="scala">
 def eval[F[_],A](f: F[A]): Stream[F,A]	  
       </code></pre>
-      <p></p>
+      <p>eval로 효과를 발생하고 결과 값을 주는 스트림을 만들 수 있다.</p>
+      <p>eval이 있는 스트림은 효과가 있는 스트림이라 toList, toVector를 바로 사용할 수 없다.</p>
       <pre><code class="scala">
 eff.toList
 // error: value toList is not a member of fs2.Stream[cats.effect.IO,Int]
 // val rb = eff.compile.drain // purely for effects
 //    	  
       </code></pre>
-
+      <p>효과가 있는 스트림을 실행하려면 아래처럼 하면 된다.</p>
       <pre><code class="scala">
 eff.compile.toVector.unsafeRunSync()
 // BEING RUN!!
 // res12: Vector[Int] = Vector(2)		  
       </code></pre>
-
+      <p>효과 있는 스트림을 실행하는 다른 방법도 많이 있다.</p>
       <pre><code class="scala">
-val ra = eff.compile.toVector // gather all output into a Vector
-// ra: IO[Vector[Int]] = <function1> // gather all output into a Vector
-val rb = eff.compile.drain // purely for effects
-// rb: IO[Unit] = <function1> // purely for effects
-val rc = eff.compile.fold(0)(_ + _) // run and accumulate some result
+val ra = eff.compile.toVector // 모든 출력을 Vector로 만든다
+// ra: IO[Vector[Int]] = <function1> 
+val rb = eff.compile.drain // 효과 발생만 하기
+// rb: IO[Unit] = <function1> 
+val rc = eff.compile.fold(0)(_ + _) // 실행하고 결과를 합치기
 // rc: IO[Int] = <function1>	  
       </code></pre>
-
+      <p>위 예제는 모두 IO를 리턴하기 때문에 효과를 발생하려면 프로그램의 끝에서 unsafe* 함수를 불러줘야한다.</p>
       <pre><code class="scala">
 ra.unsafeRunSync()
 // BEING RUN!!
@@ -104,9 +105,11 @@ rc.unsafeRunSync()
 // res16: Int = 2	  
       </code></pre>
     </section>
-
+    <p>rc 값을 보면 다시 실행했을 때 캐시되지 않고 효과가 다시 발생하는 것을 알 수 있다.</p>
+    
     <section>
       <h2>청크</h2>
+      <p>스트림은 성능을 위해 내부적으로 청크를 쓴다. 청크를 직접 만드려면 Stream.chunk를 부르면 된다.</p>
       <pre><code class="scala">
 import fs2.Chunk
 
@@ -124,6 +127,7 @@ s1c.mapChunks { ds =>
 
     <section>
       <h2>기본 스트림 연산</h2>
+      <p>스트림의 중요한 기본 연산은 ++, map, flatMap, handleErrorWith, bracket 이다.</p>
       <pre><code class="scala">
 val appendEx1 = Stream(1,2,3) ++ Stream.emit(42)
 // appendEx1: Stream[Nothing, Int] = Stream(..)
@@ -138,6 +142,7 @@ appendEx2.compile.toVector.unsafeRunSync()
 appendEx1.map(_ + 1).toList
 // res20: List[Int] = List(2, 3, 4, 43)	  
       </code></pre>
+      <p>flatMap 연산은 리스트에 있는 것과 비슷하다.</p>
       <pre><code class="scala">
 appendEx1.flatMap(i => Stream.emits(List(i,i))).toList
 // res21: List[Int] = List(1, 1, 2, 2, 3, 3, 42, 42)
@@ -146,6 +151,7 @@ appendEx1.flatMap(i => Stream.emits(List(i,i))).toList
 
     <section>
       <h2>에러 처리</h2>
+      <p>스트림에서 에러가 발생할 수 있다. Stream.raiseError를 써서 명시적으로 낼 수 도 있고 암묵적으로 발생할 수 도 있다.</p>
       <pre><code class="scala">
 val err = Stream.raiseError[IO](new Exception("oh noes!"))
 // err: Stream[IO, Nothing] = Stream(..)
@@ -154,6 +160,7 @@ val err2 = Stream(1,2,3) ++ (throw new Exception("!@#$"))
 val err3 = Stream.eval(IO(throw new Exception("error in effect!!!")))
 // err3: Stream[IO, Nothing] = Stream(..)
       </code></pre>
+      <p>위 스트림은 모두 실행하면 에러가 난다.</p>
       <pre><code class="scala">
 try err.compile.toList.unsafeRunSync catch { case e: Exception => println(e) }
 // java.lang.Exception: oh noes!
@@ -168,6 +175,7 @@ try err2.toList catch { case e: Exception => println(e) }
 try err3.compile.drain.unsafeRunSync() catch { case e: Exception => println(e) }
 // java.lang.Exception: error in effect!!!
       </code></pre>
+      <p>handleErrorWith로 에러를 잡을 수 있다. 리소스 반납을 위해 handleErrorWith를 쓰지마라. 대신 bracket을 써라.(뒤에 나옴)</p>
       <pre><code class="scala">
 err.handleErrorWith { e => Stream.emit(e.getMessage) }.compile.toList.unsafeRunSync()
 // res25: List[String] = List("oh noes!")
@@ -176,6 +184,7 @@ err.handleErrorWith { e => Stream.emit(e.getMessage) }.compile.toList.unsafeRunS
 
     <section>
       <h2>리소스 획득</h2>
+      <p>리소스를 얻고 반납하는 것을 보장하려면 bracket을 쓰면 된다.</p>
       <pre><code class="scala">
 val count = new java.util.concurrent.atomic.AtomicLong(0)
 // count: java.util.concurrent.atomic.AtomicLong = 0
@@ -190,17 +199,19 @@ Stream.bracket(acquire)(_ => release).flatMap(_ => Stream(1,2,3) ++ err).compile
 // 	at repl.Session$App.<init>(guide.md:153)
 // 	at repl.Session$.app(guide.md:3)
       </code></pre>
+      <p>스트림 안에서 에러가 나도 release가 실행된다.</p>
       <pre><code class="scala">
 count.get
 // res26: Long = 0L
       </code></pre>
+      <p>아래는 bracket 정의다.</p>
       <pre><code class="scala">
 def bracket[F[_], R](acquire: F[R])(release: R => F[Unit]): Stream[F, R]
       </code></pre>
     </section>
 
     <section>
-      <h2>예제 (스트림 만들기)</h2>
+      <h2>연습문제 (스트림 만들기)</h2>
       <pre><code class="scala">
 Stream(1,0).repeat.take(6).toList
 // res27: List[Int] = List(1, 0, 1, 0, 1, 0)
@@ -315,6 +326,7 @@ Stream(1,2,3).merge(Stream.eval(IO { Thread.sleep(200); 4 })).compile.toVector.u
 // Stream(1,2,3).merge(Stream.eval(IO { Thread.sleep(200); 4 })).compile.toVector.unsafeRunSync()
 // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
       </code></pre>
+      <p>merge 함수를 쓰려면 암묵적인 컨텍스트 안에 cats.effect.ContextShift[IO]가 필요하다.</p>
       <pre><code class="scala">
 import cats.effect.{ContextShift, IO}
 
@@ -324,6 +336,7 @@ implicit val ioContextShift: ContextShift[IO] = IO.contextShift(scala.concurrent
 Stream(1,2,3).merge(Stream.eval(IO { Thread.sleep(200); 4 })).compile.toVector.unsafeRunSync()
 // res40: Vector[Int] = Vector(1, 2, 3, 4)
       </code></pre>
+      <p>merge 함수는 동시성을 지원한다. 그 밖에도 concurrently, interrupt, either, mergeHaltBoth등 많은 동시성 함수가 있다.</p> 
       <pre><code class="scala">
 // note Concurrent[F] bound
 import cats.effect.Concurrent
