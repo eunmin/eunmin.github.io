@@ -298,11 +298,19 @@ But I will call out Clojure and Haskell's references as being particularly super
  
 All right, let's see why things are complex. State, we already talked about. It complects everything it touches. Objects complect state, identity, and value. They mix these three things up in a way that you cannot extricate the parts.
 
+객체는 상태, 아이덴티티, 값을 분리할 수 없게 섞어 놨다.
+
 Methods complect function and state, ordinarily, right? In addition, in some languages, they complect namespaces. Derive from two things in Java and have the same name method, and [hand gesture with sounds like explosion]. It doesn't work.
+
+메소드는 함수와 상태를 섞어 놨고 어떤 언어에서는 네임스페이스까지 섞여있다.
 
 Syntax, interestingly, complects meaning and order often in a very unidirectional way. Professor Sussman made the great point about data versus syntax, and it's super true. I don't care how many you really love the syntax of your favorite language. It's inferior to data in every way.
 
+문법은 의미와 순서를 섞어 놨다. 수잔 교수는 데이터와 문법에 대한 중요한 지점을 만들었다.(?)
+
 Inheritance complects types. These two types are complected. That's what it means: inheritance, complecting. It's definitional.
+
+상속은 타입을 섞는다.
 
 Switching and matching, they complect multiple pairs of who's going to do something and what happens, and they do it all in one place in a closed way. That's very bad.
 
@@ -329,6 +337,8 @@ So I'd love to say the first step in getting a simpler life is to just choose si
 [Audience laughter]
 
 Functions, most languages have them. Thank goodness. If you don't know what they are, they're like stateless methods.
+
+함수는 상태가 없는 메서드다.
 
 [Audience laughter]
 
@@ -382,6 +392,8 @@ The other thing is to maintain this approach that says, "I don't know; I don't w
 
 ![00:50:39 What](SimpleMadeEasy/00.50.39.jpg)
 
+- What은 동작이다.
+
 All right, so what is what? What is the operations. What is what we want to accomplish. We're going to form abstractions by taking functions and, more particularly, sets of functions and giving them names. In particular -- and you're going to use whatever your language lets you use. If you only have interfaces, you'll use that. If you have protocols or type classes, you'll use those. All those things are in the category of the things you use to make sets of functions that are going to be abstractions. And they're really sets of specifications of functions.
 
 The point I'd like to get across today is just that they should be really small, much smaller than what we typically see. Java interfaces are huge, and the reason why they are huge is because Java doesn't have union types, so it's inconvenient to say this function takes, you know, something that does this and that and that. You have to make a this and that and that interface, so we see these giant interfaces. And the thing with those giant interfaces is that it's a lot harder to break up those programs, so you're going to represent them with your polymorphism constructs.
@@ -393,6 +405,8 @@ And the biggest problem you have when you're doing this part of design is if you
 Strictly separating what from how is the key to making how somebody else's problem. If you've done this really well, you can pawn off the work of how on somebody else. You can say database engine, you figure out how to do this thing or, logic engine, you figure out how to search for this. I don't need to know.
 
 ![00:52:41 Who](SimpleMadeEasy/00.52.41.jpg)
+
+- Who는 데이터나 엔티니다.
 
 Who is about, like, data or entities. These are the things that our abstractions are going to be connected to eventually depending on how your technology works. You want to build components up from subcomponents in a sort of direct injection style. You don't want to, like, hardwire what the subcomponents are. You want to, as much as possible, take them as arguments because that's going to give you more programmatic flexibility in how you build things.
 
